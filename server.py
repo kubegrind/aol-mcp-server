@@ -77,15 +77,15 @@ def _extract_body(msg: email.message.Message) -> str:
             ct = part.get_content_type()
             if ct == "text/plain" and not plain:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     plain = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
             elif ct == "text/html" and not html:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
     else:
         payload = msg.get_payload(decode=True)
-        if payload:
+        if isinstance(payload, bytes):
             plain = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
     return plain or html or "(no body)"
 
@@ -412,7 +412,8 @@ def mark_read(message_ids: str) -> str:
         if not ids:
             return "No message IDs provided."
 
-        ok, failed = [], []
+        ok: list[str] = []
+        failed: list[str] = []
         with _imap() as imap:
             imap.select("INBOX")
             for mid in ids:
