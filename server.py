@@ -78,21 +78,15 @@ def _extract_body(msg: email.message.Message) -> str:
             if ct == "text/plain" and not plain:
                 payload = part.get_payload(decode=True)
                 if payload:
-                    plain = payload.decode(
-                        part.get_content_charset() or "utf-8", errors="replace"
-                    )
+                    plain = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
             elif ct == "text/html" and not html:
                 payload = part.get_payload(decode=True)
                 if payload:
-                    html = payload.decode(
-                        part.get_content_charset() or "utf-8", errors="replace"
-                    )
+                    html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
     else:
         payload = msg.get_payload(decode=True)
         if payload:
-            plain = payload.decode(
-                msg.get_content_charset() or "utf-8", errors="replace"
-            )
+            plain = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
     return plain or html or "(no body)"
 
 
@@ -101,11 +95,11 @@ def _parse(raw: bytes) -> dict:
     msg = email.message_from_bytes(raw)
     return {
         "subject": _decode_header(msg.get("Subject", "")),
-        "sender":  _decode_header(msg.get("From", "")),
-        "date":    msg.get("Date", ""),
-        "msg_id":  msg.get("Message-ID", ""),
-        "body":    _extract_body(msg),
-        "_msg":    msg,
+        "sender": _decode_header(msg.get("From", "")),
+        "date": msg.get("Date", ""),
+        "msg_id": msg.get("Message-ID", ""),
+        "body": _extract_body(msg),
+        "_msg": msg,
     }
 
 
@@ -283,17 +277,17 @@ def reply_email(message_id: str, body: str) -> str:
                 return f"Email ID {message_id!r} not found."
             original = email.message_from_bytes(data[0][1])
 
-        sender      = original.get("From", "")
-        orig_subj   = _decode_header(original.get("Subject", ""))
+        sender = original.get("From", "")
+        orig_subj = _decode_header(original.get("Subject", ""))
         orig_msg_id = original.get("Message-ID", "")
-        reply_subj  = orig_subj if orig_subj.startswith("Re:") else f"Re: {orig_subj}"
+        reply_subj = orig_subj if orig_subj.startswith("Re:") else f"Re: {orig_subj}"
 
         msg = email.mime.multipart.MIMEMultipart()
-        msg["From"]        = AOL_EMAIL
-        msg["To"]          = sender
-        msg["Subject"]     = reply_subj
+        msg["From"] = AOL_EMAIL
+        msg["To"] = sender
+        msg["Subject"] = reply_subj
         msg["In-Reply-To"] = orig_msg_id
-        msg["References"]  = orig_msg_id
+        msg["References"] = orig_msg_id
         msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
 
         with _smtp() as smtp:
@@ -323,7 +317,11 @@ def delete_email(message_id: str) -> str:
             for entry in folder_list or []:
                 if entry:
                     parts = entry.decode().split('"')
-                    name = parts[-1].strip().strip('"') if len(parts) > 1 else entry.decode().split()[-1]
+                    name = (
+                        parts[-1].strip().strip('"')
+                        if len(parts) > 1
+                        else entry.decode().split()[-1]
+                    )
                     folder_names.append(name)
 
             trash = next(
@@ -461,10 +459,10 @@ def get_attachments(message_id: str) -> str:
 
             if size < 1024:
                 size_str = f"{size} B"
-            elif size < 1024 ** 2:
+            elif size < 1024**2:
                 size_str = f"{size / 1024:.1f} KB"
             else:
-                size_str = f"{size / 1024 ** 2:.1f} MB"
+                size_str = f"{size / 1024**2:.1f} MB"
 
             attachments.append(f"  • {filename}  [{part.get_content_type()}]  {size_str}")
 

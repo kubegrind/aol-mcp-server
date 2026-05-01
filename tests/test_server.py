@@ -220,15 +220,19 @@ class TestSendEmail:
 
 class TestReplyEmail:
     def test_reply_sent(self):
-        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap()), \
-             patch("smtplib.SMTP_SSL", return_value=_mock_smtp()):
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=_mock_imap()),
+            patch("smtplib.SMTP_SSL", return_value=_mock_smtp()),
+        ):
             result = server.reply_email("1", "Got it, thanks!")
         assert "sent" in result.lower()
 
     def test_reply_sets_re_prefix(self):
         smtp = _mock_smtp()
-        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap()), \
-             patch("smtplib.SMTP_SSL", return_value=smtp):
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=_mock_imap()),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
             server.reply_email("1", "Reply body")
         raw_msg = smtp.sendmail.call_args[0][2]
         assert "Re:" in raw_msg
@@ -237,8 +241,10 @@ class TestReplyEmail:
         raw = _build_raw_email(subject="Re: Existing Thread")
         mock_imap = _mock_imap(fetch_data=[(b"1", raw), b")"])
         smtp = _mock_smtp()
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap), \
-             patch("smtplib.SMTP_SSL", return_value=smtp):
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
             server.reply_email("1", "body")
         raw_msg = smtp.sendmail.call_args[0][2]
         assert "Re: Re:" not in raw_msg
