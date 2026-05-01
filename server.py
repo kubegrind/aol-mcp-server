@@ -111,6 +111,19 @@ def _preview(text: str, length: int = 120) -> str:
 SEP = "─" * 52
 
 
+def _folder_name(entry: bytes) -> str:
+    """Extract folder name from an IMAP LIST response entry.
+
+    Entries end with a quoted name like ``("/" "INBOX"`` or an unquoted
+    token.  Splitting on ``"`` gives an empty last element for quoted names,
+    so we take the second-to-last segment in that case.
+    """
+    decoded = entry.decode()
+    if decoded.endswith('"'):
+        return decoded.rsplit('"', 2)[-2]
+    return decoded.split()[-1]
+
+
 @mcp.tool()
 def read_inbox(count: int = 10) -> str:
     """List recent emails from the AOL Mail inbox.
@@ -313,16 +326,7 @@ def delete_email(message_id: str) -> str:
             imap.select("INBOX")
 
             _, folder_list = imap.list()
-            folder_names = []
-            for entry in folder_list or []:
-                if entry:
-                    parts = entry.decode().split('"')
-                    name = (
-                        parts[-1].strip().strip('"')
-                        if len(parts) > 1
-                        else entry.decode().split()[-1]
-                    )
-                    folder_names.append(name)
+            folder_names = [_folder_name(e) for e in (folder_list or []) if e]
 
             trash = next(
                 (f for f in ("Trash", "Deleted Items", "Deleted Messages") if f in folder_names),
@@ -380,15 +384,7 @@ def list_folders() -> str:
         with _imap() as imap:
             _, folder_list = imap.list()
 
-        names = []
-        for entry in folder_list or []:
-            if not entry:
-                continue
-            decoded = entry.decode()
-            parts = decoded.split('"')
-            name = parts[-1].strip().strip('"') if len(parts) > 1 else decoded.split()[-1]
-            if name:
-                names.append(name)
+        names = [_folder_name(e) for e in (folder_list or []) if e]
 
         if not names:
             return "No folders found."
