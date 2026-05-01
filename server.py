@@ -1,0 +1,493 @@
+"""AOL Mail MCP Server — production-ready stdio server using FastMCP."""
+
+import email
+import email.header
+import email.mime.multipart
+import email.mime.text
+import imaplib
+import os
+import smtplib
+from contextlib import contextmanager
+
+from dotenv import load_dotenv
+from fastmcp import FastMCP
+
+load_dotenv()
+
+AOL_EMAIL: str = os.getenv("AOL_EMAIL", "")
+AOL_APP_PASSWORD: str = os.getenv("AOL_APP_PASSWORD", "")
+
+IMAP_HOST = "imap.aol.com"
+IMAP_PORT = 993
+SMTP_HOST = "smtp.aol.com"
+SMTP_PORT = 465
+
+mcp = FastMCP("AOL Mail")
+
+
+@contextmanager
+def _imap():
+    """Open an SSL IMAP session and guarantee logout on exit."""
+    conn = None
+    try:
+        conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+        conn.login(AOL_EMAIL, AOL_APP_PASSWORD)
+        yield conn
+    finally:
+        if conn:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+
+@contextmanager
+def _smtp():
+    """Open an SSL SMTP session and guarantee quit on exit."""
+    conn = None
+    try:
+        conn = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT)
+        conn.login(AOL_EMAIL, AOL_APP_PASSWORD)
+        yield conn
+    finally:
+        if conn:
+            try:
+                conn.quit()
+            except Exception:
+                pass
+
+
+def _decode_header(value: str) -> str:
+    """Decode an RFC 2047-encoded header value to a plain string."""
+    parts = email.header.decode_header(value or "")
+    result = []
+    for fragment, charset in parts:
+        if isinstance(fragment, bytes):
+            result.append(fragment.decode(charset or "utf-8", errors="replace"))
+        else:
+            result.append(fragment)
+    return "".join(result)
+
+
+def _extract_body(msg: email.message.Message) -> str:
+    """Return best-effort plain-text body from a parsed email message."""
+    plain = html = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = part.get_content_type()
+            if ct == "text/plain" and not plain:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    plain = payload.decode(
+                        part.get_content_charset() or "utf-8", errors="replace"
+                    )
+            elif ct == "text/html" and not html:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    html = payload.decode(
+                        part.get_content_charset() or "utf-8", errors="replace"
+                    )
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            plain = payload.decode(
+                msg.get_content_charset() or "utf-8", errors="replace"
+            )
+    return plain or html or "(no body)"
+
+
+def _parse(raw: bytes) -> dict:
+    """Parse raw email bytes into a structured dict."""
+    msg = email.message_from_bytes(raw)
+    return {
+        "subject": _decode_header(msg.get("Subject", "")),
+        "sender":  _decode_header(msg.get("From", "")),
+        "date":    msg.get("Date", ""),
+        "msg_id":  msg.get("Message-ID", ""),
+        "body":    _extract_body(msg),
+        "_msg":    msg,
+    }
+
+
+def _preview(text: str, length: int = 120) -> str:
+    snippet = text.replace("\n", " ").strip()
+    return snippet[:length] + "…" if len(snippet) > length else snippet
+
+
+SEP = "─" * 52
+
+
+@mcp.tool()
+def read_inbox(count: int = 10) -> str:
+    """List recent emails from the AOL Mail inbox.
+
+    Args:
+        count: Number of recent emails to fetch (1–50, default 10).
+
+    Returns:
+        Formatted list with ID, sender, subject, date, and a short preview.
+    """
+    try:
+        count = max(1, min(count, 50))
+        with _imap() as imap:
+            imap.select("INBOX")
+            _, data = imap.search(None, "ALL")
+            ids = data[0].split()
+            slice_ = list(reversed(ids[-count:]))
+
+            lines = []
+            for mid in slice_:
+                _, fdata = imap.fetch(mid, "(RFC822)")
+                parsed = _parse(fdata[0][1])
+                lines.append(
+                    f"ID: {mid.decode()}\n"
+                    f"From: {parsed['sender']}\n"
+                    f"Subject: {parsed['subject']}\n"
+                    f"Date: {parsed['date']}\n"
+                    f"Preview: {_preview(parsed['body'])}\n"
+                    f"{SEP}"
+                )
+
+        if not lines:
+            return "Inbox is empty."
+        return f"Inbox — {len(lines)} email(s):\n\n" + "\n\n".join(lines)
+    except Exception as exc:
+        return f"Error reading inbox: {exc}"
+
+
+@mcp.tool()
+def read_email(message_id: str) -> str:
+    """Get the full content of a single email by its IMAP message ID.
+
+    Args:
+        message_id: Numeric IMAP message ID returned by read_inbox or search_emails.
+
+    Returns:
+        Full headers and body of the email.
+    """
+    try:
+        with _imap() as imap:
+            imap.select("INBOX")
+            _, data = imap.fetch(message_id.encode(), "(RFC822)")
+            if not data or data[0] is None:
+                return f"Email ID {message_id!r} not found in INBOX."
+            parsed = _parse(data[0][1])
+
+        return (
+            f"From: {parsed['sender']}\n"
+            f"Subject: {parsed['subject']}\n"
+            f"Date: {parsed['date']}\n"
+            f"Message-ID: {parsed['msg_id']}\n"
+            f"{SEP}\n"
+            f"{parsed['body']}"
+        )
+    except Exception as exc:
+        return f"Error reading email {message_id!r}: {exc}"
+
+
+@mcp.tool()
+def search_emails(query: str, search_in: str = "ALL", count: int = 10) -> str:
+    """Search the inbox for emails matching a keyword.
+
+    Args:
+        query:     The search term.
+        search_in: Field to search — ALL, FROM, SUBJECT, or BODY (default ALL).
+        count:     Maximum results to return (1–50, default 10).
+
+    Returns:
+        Matching emails with ID, sender, subject, and date.
+    """
+    try:
+        count = max(1, min(count, 50))
+        field = search_in.upper()
+        if field not in {"ALL", "FROM", "SUBJECT", "BODY"}:
+            return "search_in must be one of: ALL, FROM, SUBJECT, BODY"
+
+        if field == "ALL":
+            criteria = f'(OR (OR FROM "{query}" SUBJECT "{query}") BODY "{query}")'
+        else:
+            criteria = f'({field} "{query}")'
+
+        with _imap() as imap:
+            imap.select("INBOX")
+            _, data = imap.search(None, criteria)
+            ids = data[0].split()
+            if not ids:
+                return f"No emails found matching {query!r}."
+
+            slice_ = list(reversed(ids))[:count]
+            lines = []
+            for mid in slice_:
+                _, fdata = imap.fetch(mid, "(RFC822)")
+                parsed = _parse(fdata[0][1])
+                lines.append(
+                    f"ID: {mid.decode()}\n"
+                    f"From: {parsed['sender']}\n"
+                    f"Subject: {parsed['subject']}\n"
+                    f"Date: {parsed['date']}\n"
+                    f"{SEP}"
+                )
+
+        return (
+            f"Found {len(ids)} match(es) for {query!r} (showing {len(lines)}):\n\n"
+            + "\n\n".join(lines)
+        )
+    except Exception as exc:
+        return f"Error searching emails: {exc}"
+
+
+@mcp.tool()
+def send_email(to: str, subject: str, body: str) -> str:
+    """Compose and send a new email via AOL SMTP.
+
+    Args:
+        to:      Recipient address(es), comma-separated for multiple.
+        subject: Email subject line.
+        body:    Plain-text email body.
+
+    Returns:
+        Success confirmation or a descriptive error message.
+    """
+    try:
+        msg = email.mime.multipart.MIMEMultipart()
+        msg["From"] = AOL_EMAIL
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
+
+        recipients = [addr.strip() for addr in to.split(",") if addr.strip()]
+        with _smtp() as smtp:
+            smtp.sendmail(AOL_EMAIL, recipients, msg.as_string())
+
+        return f"Email sent to {to}."
+    except Exception as exc:
+        return f"Error sending email: {exc}"
+
+
+@mcp.tool()
+def reply_email(message_id: str, body: str) -> str:
+    """Reply to an existing email by its IMAP message ID.
+
+    Args:
+        message_id: Numeric IMAP message ID of the email to reply to.
+        body:       Plain-text reply body.
+
+    Returns:
+        Success confirmation or a descriptive error message.
+    """
+    try:
+        with _imap() as imap:
+            imap.select("INBOX")
+            _, data = imap.fetch(message_id.encode(), "(RFC822)")
+            if not data or data[0] is None:
+                return f"Email ID {message_id!r} not found."
+            original = email.message_from_bytes(data[0][1])
+
+        sender      = original.get("From", "")
+        orig_subj   = _decode_header(original.get("Subject", ""))
+        orig_msg_id = original.get("Message-ID", "")
+        reply_subj  = orig_subj if orig_subj.startswith("Re:") else f"Re: {orig_subj}"
+
+        msg = email.mime.multipart.MIMEMultipart()
+        msg["From"]        = AOL_EMAIL
+        msg["To"]          = sender
+        msg["Subject"]     = reply_subj
+        msg["In-Reply-To"] = orig_msg_id
+        msg["References"]  = orig_msg_id
+        msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
+
+        with _smtp() as smtp:
+            smtp.sendmail(AOL_EMAIL, [sender], msg.as_string())
+
+        return f"Reply sent to {sender}."
+    except Exception as exc:
+        return f"Error replying to email {message_id!r}: {exc}"
+
+
+@mcp.tool()
+def delete_email(message_id: str) -> str:
+    """Move an email to the Trash folder by its IMAP message ID.
+
+    Args:
+        message_id: Numeric IMAP message ID of the email to delete.
+
+    Returns:
+        Confirmation of deletion or a descriptive error message.
+    """
+    try:
+        with _imap() as imap:
+            imap.select("INBOX")
+
+            _, folder_list = imap.list()
+            folder_names = []
+            for entry in folder_list or []:
+                if entry:
+                    parts = entry.decode().split('"')
+                    name = parts[-1].strip().strip('"') if len(parts) > 1 else entry.decode().split()[-1]
+                    folder_names.append(name)
+
+            trash = next(
+                (f for f in ("Trash", "Deleted Items", "Deleted Messages") if f in folder_names),
+                "Trash",
+            )
+
+            status, _ = imap.copy(message_id.encode(), trash)
+            if status != "OK":
+                return f"Could not copy email {message_id!r} to {trash!r}."
+
+            imap.store(message_id.encode(), "+FLAGS", "\\Deleted")
+            imap.expunge()
+
+        return f"Email {message_id} moved to {trash!r}."
+    except Exception as exc:
+        return f"Error deleting email {message_id!r}: {exc}"
+
+
+@mcp.tool()
+def move_email(message_id: str, folder: str) -> str:
+    """Move an email to any named IMAP folder.
+
+    Args:
+        message_id: Numeric IMAP message ID of the email to move.
+        folder:     Destination folder name (use list_folders to see available names).
+
+    Returns:
+        Confirmation or a descriptive error message.
+    """
+    try:
+        with _imap() as imap:
+            imap.select("INBOX")
+            status, _ = imap.copy(message_id.encode(), folder)
+            if status != "OK":
+                return (
+                    f"Could not copy email {message_id!r} to {folder!r}. "
+                    "Use list_folders to verify the folder name."
+                )
+            imap.store(message_id.encode(), "+FLAGS", "\\Deleted")
+            imap.expunge()
+
+        return f"Email {message_id} moved to {folder!r}."
+    except Exception as exc:
+        return f"Error moving email {message_id!r}: {exc}"
+
+
+@mcp.tool()
+def list_folders() -> str:
+    """List all IMAP folders available in the AOL mailbox.
+
+    Returns:
+        Bullet list of every folder name in the account.
+    """
+    try:
+        with _imap() as imap:
+            _, folder_list = imap.list()
+
+        names = []
+        for entry in folder_list or []:
+            if not entry:
+                continue
+            decoded = entry.decode()
+            parts = decoded.split('"')
+            name = parts[-1].strip().strip('"') if len(parts) > 1 else decoded.split()[-1]
+            if name:
+                names.append(name)
+
+        if not names:
+            return "No folders found."
+        return "Available folders:\n" + "\n".join(f"  • {n}" for n in names)
+    except Exception as exc:
+        return f"Error listing folders: {exc}"
+
+
+@mcp.tool()
+def mark_read(message_ids: str) -> str:
+    """Mark one or more emails as read.
+
+    Args:
+        message_ids: Single IMAP message ID or comma-separated list (e.g. "42,43,44").
+
+    Returns:
+        Summary of which IDs were marked and any failures.
+    """
+    try:
+        ids = [mid.strip() for mid in message_ids.split(",") if mid.strip()]
+        if not ids:
+            return "No message IDs provided."
+
+        ok, failed = [], []
+        with _imap() as imap:
+            imap.select("INBOX")
+            for mid in ids:
+                status, _ = imap.store(mid.encode(), "+FLAGS", "\\Seen")
+                (ok if status == "OK" else failed).append(mid)
+
+        parts = []
+        if ok:
+            parts.append(f"Marked as read: {', '.join(ok)}")
+        if failed:
+            parts.append(f"Failed: {', '.join(failed)}")
+        return ". ".join(parts) + "."
+    except Exception as exc:
+        return f"Error marking emails as read: {exc}"
+
+
+@mcp.tool()
+def get_attachments(message_id: str) -> str:
+    """List all attachments in an email by its IMAP message ID.
+
+    Args:
+        message_id: Numeric IMAP message ID of the email to inspect.
+
+    Returns:
+        Each attachment's filename, MIME type, and size, or a 'no attachments' notice.
+    """
+    try:
+        with _imap() as imap:
+            imap.select("INBOX")
+            _, data = imap.fetch(message_id.encode(), "(RFC822)")
+            if not data or data[0] is None:
+                return f"Email ID {message_id!r} not found."
+            msg = email.message_from_bytes(data[0][1])
+
+        attachments = []
+        for part in msg.walk():
+            disposition = str(part.get("Content-Disposition", ""))
+            if "attachment" not in disposition:
+                continue
+
+            filename = _decode_header(part.get_filename() or "") or "unnamed"
+            payload = part.get_payload(decode=True)
+            size = len(payload) if payload else 0
+
+            if size < 1024:
+                size_str = f"{size} B"
+            elif size < 1024 ** 2:
+                size_str = f"{size / 1024:.1f} KB"
+            else:
+                size_str = f"{size / 1024 ** 2:.1f} MB"
+
+            attachments.append(f"  • {filename}  [{part.get_content_type()}]  {size_str}")
+
+        if not attachments:
+            return f"No attachments found in email {message_id}."
+        return f"Attachments in email {message_id}:\n" + "\n".join(attachments)
+    except Exception as exc:
+        return f"Error getting attachments for email {message_id!r}: {exc}"
+
+
+def main() -> None:
+    """Start the MCP server.
+
+    Called by ``uv run server.py``, ``python server.py``, or
+    the installed ``aol-mcp-server`` script (via uvx).
+    """
+    if not AOL_EMAIL or not AOL_APP_PASSWORD:
+        raise SystemExit(
+            "AOL_EMAIL and AOL_APP_PASSWORD must be set.\n"
+            "Copy .env.example to .env and fill in your credentials."
+        )
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "aol-mail": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--with", "fastmcp",
+        "--with", "python-dotenv",
+        "server.py"
+      ],
+      "env": {
+        "AOL_EMAIL": "your_email@aol.com",
+        "AOL_APP_PASSWORD": "your_app_password"
+      }
+    }
+  }
+}
