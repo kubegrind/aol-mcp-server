@@ -219,6 +219,21 @@ class TestSendEmail:
         call_args = smtp.sendmail.call_args[0]
         assert len(call_args[1]) == 3
 
+    def test_send_has_date_header(self):
+        smtp = _mock_smtp()
+        with patch("smtplib.SMTP_SSL", return_value=smtp):
+            server.send_email("to@example.com", "Subject", "Body")
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "Date:" in raw_msg
+
+    def test_send_is_plain_text_not_multipart(self):
+        smtp = _mock_smtp()
+        with patch("smtplib.SMTP_SSL", return_value=smtp):
+            server.send_email("to@example.com", "Subject", "Body")
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "Content-Type: text/plain" in raw_msg
+        assert "multipart" not in raw_msg
+
     def test_smtp_auth_failure_returns_string(self):
         with patch("smtplib.SMTP_SSL", side_effect=Exception("auth failed")):
             result = server.send_email("to@example.com", "Subject", "Body")
@@ -255,6 +270,16 @@ class TestReplyEmail:
             server.reply_email("1", "body")
         raw_msg = smtp.sendmail.call_args[0][2]
         assert "Re: Re:" not in raw_msg
+
+    def test_reply_has_date_header(self):
+        smtp = _mock_smtp()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=_mock_imap()),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
+            server.reply_email("1", "body")
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "Date:" in raw_msg
 
     def test_email_not_found(self):
         with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(fetch_data=FETCH_MISSING)):

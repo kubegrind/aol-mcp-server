@@ -1,6 +1,6 @@
 [project]
 name = "aol-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "MCP server for AOL Mail via IMAP and SMTP"
 readme = "README.md"
 requires-python = ">=3.11"

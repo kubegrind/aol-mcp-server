@@ -2,8 +2,8 @@
 
 import email
 import email.header
-import email.mime.multipart
 import email.mime.text
+import email.utils
 import html
 import html.parser
 import imaplib
@@ -342,11 +342,11 @@ def send_email(to: str, subject: str, body: str) -> str:
         Success confirmation or a descriptive error message.
     """
     try:
-        msg = email.mime.multipart.MIMEMultipart()
+        msg = email.mime.text.MIMEText(body, "plain", "utf-8")
         msg["From"] = AOL_EMAIL
         msg["To"] = to
         msg["Subject"] = subject
-        msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
+        msg["Date"] = email.utils.formatdate(localtime=True)
 
         recipients = [addr.strip() for addr in to.split(",") if addr.strip()]
         with _smtp() as smtp:
@@ -382,13 +382,13 @@ def reply_email(message_id: str, body: str, folder: str = "INBOX") -> str:
         orig_msg_id = original.get("Message-ID", "")
         reply_subj = orig_subj if orig_subj.startswith("Re:") else f"Re: {orig_subj}"
 
-        msg = email.mime.multipart.MIMEMultipart()
+        msg = email.mime.text.MIMEText(body, "plain", "utf-8")
         msg["From"] = AOL_EMAIL
         msg["To"] = sender
         msg["Subject"] = reply_subj
+        msg["Date"] = email.utils.formatdate(localtime=True)
         msg["In-Reply-To"] = orig_msg_id
         msg["References"] = orig_msg_id
-        msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
 
         with _smtp() as smtp:
             smtp.sendmail(AOL_EMAIL, [sender], msg.as_string())
