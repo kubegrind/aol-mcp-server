@@ -179,29 +179,35 @@ Restart Claude Desktop after saving — AOL Mail tools appear in the tools panel
 
 | Tool | Description |
 |------|-------------|
-| `read_inbox` | List recent emails with sender, subject, date, and preview |
-| `read_email` | Fetch full body and headers by IMAP message ID |
-| `search_emails` | Search by keyword across FROM, SUBJECT, BODY, or ALL fields |
+| `read_inbox` | List recent emails from any folder (default: INBOX) |
+| `read_folder` | List recent emails from a named folder (e.g. LinkedIn, GitHub) |
+| `read_email` | Fetch full body and headers by IMAP message ID, with optional folder |
+| `search_emails` | Search by keyword in any folder across FROM, SUBJECT, BODY, or ALL |
 | `send_email` | Compose and send a new email |
-| `reply_email` | Reply to an existing email by message ID |
-| `delete_email` | Move an email to Trash by message ID |
-| `move_email` | Move an email to any named IMAP folder |
+| `reply_email` | Reply to an existing email by message ID, with optional folder |
+| `delete_email` | Move an email to Trash by message ID, with optional folder |
+| `delete_all_in_folder` | Bulk delete — move every email in a folder to Trash |
+| `move_email` | Move an email to any named folder, with optional source folder |
+| `move_all_emails` | Bulk move — move all emails from one folder to another |
 | `list_folders` | List all IMAP folders in the mailbox |
-| `mark_read` | Mark one or multiple emails as read |
+| `mark_read` | Mark one or multiple emails as read, with optional folder |
 | `get_attachments` | List all attachments (name, MIME type, size) in an email |
 
 ### Example Prompts
 
 ```
 Show me the last 5 emails in my inbox.
-Read email ID 42.
-Search for emails from boss@example.com.
+Show me the last 10 emails in my LinkedIn folder.
+Read email ID 42 from my GitHub folder.
+Search for emails from boss@example.com in my Sent folder.
 Send an email to alice@example.com with subject "Hello" and body "Hi Alice!".
 Reply to email 17 with "Thanks, got it!".
-Delete email 99.
+Delete email 99 from my LinkedIn folder.
+Delete all emails in my Spam folder.
 Move email 55 to folder Work.
+Move all emails from LinkedIn to Archive.
 List all my mail folders.
-Mark emails 10, 11, 12 as read.
+Mark emails 10, 11, 12 as read in my GitHub folder.
 List attachments in email 33.
 ```
 

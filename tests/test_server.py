@@ -400,3 +400,177 @@ class TestGetAttachments:
         with patch("imaplib.IMAP4_SSL", side_effect=Exception("imap down")):
             result = server.get_attachments("1")
         assert result.startswith("Error")
+
+
+class TestFolderParameters:
+    def test_read_inbox_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.read_inbox(count=3, folder="LinkedIn")
+        mock_imap.select.assert_called_with("LinkedIn")
+        assert "Error" not in result
+
+    def test_read_inbox_empty_custom_folder(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
+            result = server.read_inbox(folder="Spam")
+        assert "empty" in result.lower()
+
+    def test_read_email_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.read_email("1", folder="Sent")
+        mock_imap.select.assert_called_with("Sent")
+        assert "From:" in result
+
+    def test_search_emails_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.search_emails("job", folder="Indeed")
+        mock_imap.select.assert_called_with("Indeed")
+        assert "Indeed" in result
+
+    def test_search_emails_no_results_includes_folder(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
+            result = server.search_emails("xyzzy", folder="GitHub")
+        assert "GitHub" in result
+
+    def test_reply_email_custom_folder(self):
+        mock_imap = _mock_imap()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch("smtplib.SMTP_SSL", return_value=_mock_smtp()),
+        ):
+            server.reply_email("1", "Thanks!", folder="Sent")
+        mock_imap.select.assert_called_with("Sent")
+
+    def test_delete_email_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.delete_email("1", folder="LinkedIn")
+        mock_imap.select.assert_called_with("LinkedIn")
+        assert "moved" in result.lower() or "Trash" in result
+
+    def test_move_email_with_source_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.move_email("1", "Archive", source_folder="GitHub")
+        mock_imap.select.assert_called_with("GitHub")
+        assert "moved" in result.lower()
+
+    def test_mark_read_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.mark_read("5", folder="LinkedIn")
+        mock_imap.select.assert_called_with("LinkedIn")
+        assert "Marked" in result
+
+    def test_get_attachments_custom_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.get_attachments("1", folder="GitHub")
+        mock_imap.select.assert_called_with("GitHub")
+        assert "No attachments" in result or "Attachments" in result
+
+
+class TestReadFolder:
+    def test_returns_emails_from_folder(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.read_folder("LinkedIn")
+        mock_imap.select.assert_called_with("LinkedIn")
+        assert "ID:" in result
+
+    def test_empty_folder(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
+            result = server.read_folder("EmptyFolder")
+        assert "empty" in result.lower()
+
+    def test_count_clamped_to_50(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap()):
+            result = server.read_folder("Spam", count=999)
+        assert "Error" not in result
+
+    def test_folder_name_in_output(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap()):
+            result = server.read_folder("GitHub", count=1)
+        assert "GitHub" in result
+
+    def test_connection_error_returns_string(self):
+        with patch("imaplib.IMAP4_SSL", side_effect=Exception("timeout")):
+            result = server.read_folder("LinkedIn")
+        assert result.startswith("Error")
+
+
+class TestDeleteAllInFolder:
+    def test_deletes_all_emails(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.delete_all_in_folder("Spam")
+        mock_imap.select.assert_called_with("Spam")
+        assert "Deleted" in result
+        mock_imap.expunge.assert_called_once()
+
+    def test_empty_folder_message(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
+            result = server.delete_all_in_folder("Spam")
+        assert "already empty" in result.lower()
+
+    def test_partial_failure_reported(self):
+        mock_imap = _mock_imap()
+        mock_imap.copy.side_effect = [
+            ("OK", [b""]),
+            ("NO", [b"failed"]),
+            ("OK", [b""]),
+        ]
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.delete_all_in_folder("LinkedIn")
+        assert "could not" in result.lower()
+
+    def test_error_returns_string(self):
+        with patch("imaplib.IMAP4_SSL", side_effect=Exception("imap down")):
+            result = server.delete_all_in_folder("Spam")
+        assert result.startswith("Error")
+
+
+class TestMoveAllEmails:
+    def test_moves_all_emails(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.move_all_emails("LinkedIn", "Archive")
+        mock_imap.select.assert_called_with("LinkedIn")
+        assert "Moved" in result
+        assert "LinkedIn" in result
+        assert "Archive" in result
+        mock_imap.expunge.assert_called_once()
+
+    def test_empty_source_folder(self):
+        with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
+            result = server.move_all_emails("EmptyFolder", "Archive")
+        assert "empty" in result.lower()
+
+    def test_partial_failure_reported(self):
+        mock_imap = _mock_imap()
+        mock_imap.copy.side_effect = [
+            ("OK", [b""]),
+            ("NO", [b"no such mailbox"]),
+            ("OK", [b""]),
+        ]
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.move_all_emails("GitHub", "Archive")
+        assert "could not" in result.lower()
+
+    def test_store_called_only_for_successful_copies(self):
+        mock_imap = _mock_imap()
+        mock_imap.copy.side_effect = [
+            ("OK", [b""]),
+            ("NO", [b"failed"]),
+            ("OK", [b""]),
+        ]
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            server.move_all_emails("Spam", "INBOX")
+        assert mock_imap.store.call_count == 2
+
+    def test_error_returns_string(self):
+        with patch("imaplib.IMAP4_SSL", side_effect=Exception("connection reset")):
+            result = server.move_all_emails("LinkedIn", "Archive")
+        assert result.startswith("Error")

@@ -166,11 +166,12 @@ def _folder_name(entry: bytes) -> str:
 
 
 @mcp.tool()
-def read_inbox(count: int = 10) -> str:
-    """List recent emails from the AOL Mail inbox.
+def read_inbox(count: int = 10, folder: str = "INBOX") -> str:
+    """List recent emails from any IMAP folder.
 
     Args:
-        count: Number of recent emails to fetch (1–50, default 10).
+        count:  Number of recent emails to fetch (1–50, default 10).
+        folder: IMAP folder to read (default "INBOX"). Use list_folders to see available names.
 
     Returns:
         Formatted list with ID, sender, subject, date, and a short preview.
@@ -178,7 +179,7 @@ def read_inbox(count: int = 10) -> str:
     try:
         count = max(1, min(count, 50))
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             _, data = imap.search(None, "ALL")
             ids = data[0].split()
             slice_ = list(reversed(ids[-count:]))
@@ -197,28 +198,69 @@ def read_inbox(count: int = 10) -> str:
                 )
 
         if not lines:
-            return "Inbox is empty."
-        return f"Inbox — {len(lines)} email(s):\n\n" + "\n\n".join(lines)
+            return f"{folder!r} is empty."
+        return f"{folder} — {len(lines)} email(s):\n\n" + "\n\n".join(lines)
     except Exception as exc:
-        return f"Error reading inbox: {exc}"
+        return f"Error reading {folder!r}: {exc}"
 
 
 @mcp.tool()
-def read_email(message_id: str) -> str:
+def read_folder(folder_name: str, count: int = 10) -> str:
+    """List recent emails from a named IMAP folder.
+
+    Args:
+        folder_name: Folder to read (e.g. "LinkedIn", "GitHub", "Spam").
+                     Use list_folders to see all available names.
+        count:       Number of recent emails to fetch (1–50, default 10).
+
+    Returns:
+        Formatted list with ID, sender, subject, date, and a short preview.
+    """
+    try:
+        count = max(1, min(count, 50))
+        with _imap() as imap:
+            imap.select(folder_name)
+            _, data = imap.search(None, "ALL")
+            ids = data[0].split()
+            slice_ = list(reversed(ids[-count:]))
+
+            lines = []
+            for mid in slice_:
+                _, fdata = imap.fetch(mid, "(RFC822)")
+                parsed = _parse(fdata[0][1])
+                lines.append(
+                    f"ID: {mid.decode()}\n"
+                    f"From: {parsed['sender']}\n"
+                    f"Subject: {parsed['subject']}\n"
+                    f"Date: {parsed['date']}\n"
+                    f"Preview: {_preview(parsed['body'])}\n"
+                    f"{SEP}"
+                )
+
+        if not lines:
+            return f"{folder_name!r} is empty."
+        return f"{folder_name} — {len(lines)} email(s):\n\n" + "\n\n".join(lines)
+    except Exception as exc:
+        return f"Error reading folder {folder_name!r}: {exc}"
+
+
+@mcp.tool()
+def read_email(message_id: str, folder: str = "INBOX") -> str:
     """Get the full content of a single email by its IMAP message ID.
 
     Args:
         message_id: Numeric IMAP message ID returned by read_inbox or search_emails.
+        folder:     IMAP folder containing the email (default "INBOX").
 
     Returns:
         Full headers and body of the email.
     """
     try:
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             _, data = imap.fetch(message_id.encode(), "(RFC822)")
             if not data or data[0] is None:
-                return f"Email ID {message_id!r} not found in INBOX."
+                return f"Email ID {message_id!r} not found in {folder!r}."
             parsed = _parse(data[0][1])
 
         return (
@@ -234,13 +276,16 @@ def read_email(message_id: str) -> str:
 
 
 @mcp.tool()
-def search_emails(query: str, search_in: str = "ALL", count: int = 10) -> str:
-    """Search the inbox for emails matching a keyword.
+def search_emails(
+    query: str, search_in: str = "ALL", count: int = 10, folder: str = "INBOX"
+) -> str:
+    """Search any IMAP folder for emails matching a keyword.
 
     Args:
         query:     The search term.
         search_in: Field to search — ALL, FROM, SUBJECT, or BODY (default ALL).
         count:     Maximum results to return (1–50, default 10).
+        folder:    IMAP folder to search (default "INBOX"). Use list_folders to see names.
 
     Returns:
         Matching emails with ID, sender, subject, and date.
@@ -257,11 +302,11 @@ def search_emails(query: str, search_in: str = "ALL", count: int = 10) -> str:
             criteria = f'({field} "{query}")'
 
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             _, data = imap.search(None, criteria)
             ids = data[0].split()
             if not ids:
-                return f"No emails found matching {query!r}."
+                return f"No emails found matching {query!r} in {folder!r}."
 
             slice_ = list(reversed(ids))[:count]
             lines = []
@@ -277,7 +322,7 @@ def search_emails(query: str, search_in: str = "ALL", count: int = 10) -> str:
                 )
 
         return (
-            f"Found {len(ids)} match(es) for {query!r} (showing {len(lines)}):\n\n"
+            f"Found {len(ids)} match(es) for {query!r} in {folder!r} (showing {len(lines)}):\n\n"
             + "\n\n".join(lines)
         )
     except Exception as exc:
@@ -313,19 +358,20 @@ def send_email(to: str, subject: str, body: str) -> str:
 
 
 @mcp.tool()
-def reply_email(message_id: str, body: str) -> str:
+def reply_email(message_id: str, body: str, folder: str = "INBOX") -> str:
     """Reply to an existing email by its IMAP message ID.
 
     Args:
         message_id: Numeric IMAP message ID of the email to reply to.
         body:       Plain-text reply body.
+        folder:     IMAP folder containing the original email (default "INBOX").
 
     Returns:
         Success confirmation or a descriptive error message.
     """
     try:
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             _, data = imap.fetch(message_id.encode(), "(RFC822)")
             if not data or data[0] is None:
                 return f"Email ID {message_id!r} not found."
@@ -353,18 +399,19 @@ def reply_email(message_id: str, body: str) -> str:
 
 
 @mcp.tool()
-def delete_email(message_id: str) -> str:
+def delete_email(message_id: str, folder: str = "INBOX") -> str:
     """Move an email to the Trash folder by its IMAP message ID.
 
     Args:
         message_id: Numeric IMAP message ID of the email to delete.
+        folder:     IMAP folder containing the email (default "INBOX").
 
     Returns:
         Confirmation of deletion or a descriptive error message.
     """
     try:
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
 
             _, folder_list = imap.list()
             folder_names = [_folder_name(e) for e in (folder_list or []) if e]
@@ -387,19 +434,66 @@ def delete_email(message_id: str) -> str:
 
 
 @mcp.tool()
-def move_email(message_id: str, folder: str) -> str:
+def delete_all_in_folder(folder_name: str) -> str:
+    """Delete all emails in a folder by moving them to Trash.
+
+    Args:
+        folder_name: Folder to clear (e.g. "Spam", "LinkedIn", "Bulk Mail").
+                     Use list_folders to see available names.
+
+    Returns:
+        Summary of how many emails were deleted or a descriptive error message.
+    """
+    try:
+        with _imap() as imap:
+            imap.select(folder_name)
+
+            _, folder_list = imap.list()
+            folder_names = [_folder_name(e) for e in (folder_list or []) if e]
+            trash = next(
+                (f for f in ("Trash", "Deleted Items", "Deleted Messages") if f in folder_names),
+                "Trash",
+            )
+
+            _, data = imap.search(None, "ALL")
+            ids = data[0].split()
+            if not ids:
+                return f"{folder_name!r} is already empty."
+
+            failed = 0
+            for mid in ids:
+                status, _ = imap.copy(mid, trash)
+                if status == "OK":
+                    imap.store(mid, "+FLAGS", "\\Deleted")
+                else:
+                    failed += 1
+
+            imap.expunge()
+
+        deleted = len(ids) - failed
+        result = f"Deleted {deleted} email(s) from {folder_name!r}."
+        if failed:
+            result += f" {failed} could not be moved to trash."
+        return result
+    except Exception as exc:
+        return f"Error deleting emails in {folder_name!r}: {exc}"
+
+
+@mcp.tool()
+def move_email(message_id: str, folder: str, source_folder: str = "INBOX") -> str:
     """Move an email to any named IMAP folder.
 
     Args:
-        message_id: Numeric IMAP message ID of the email to move.
-        folder:     Destination folder name (use list_folders to see available names).
+        message_id:    Numeric IMAP message ID of the email to move.
+        folder:        Destination folder name (use list_folders to see available names).
+        source_folder: Folder currently containing the email (default "INBOX").
 
     Returns:
         Confirmation or a descriptive error message.
     """
     try:
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(source_folder)
             status, _ = imap.copy(message_id.encode(), folder)
             if status != "OK":
                 return (
@@ -412,6 +506,45 @@ def move_email(message_id: str, folder: str) -> str:
         return f"Email {message_id} moved to {folder!r}."
     except Exception as exc:
         return f"Error moving email {message_id!r}: {exc}"
+
+
+@mcp.tool()
+def move_all_emails(source_folder: str, destination_folder: str) -> str:
+    """Move all emails from one folder to another.
+
+    Args:
+        source_folder:      Folder to move emails from (e.g. "LinkedIn", "Spam").
+        destination_folder: Folder to move emails into (e.g. "INBOX", "Archive").
+                            Use list_folders to see available names.
+
+    Returns:
+        Summary of how many emails were moved or a descriptive error message.
+    """
+    try:
+        with _imap() as imap:
+            imap.select(source_folder)
+            _, data = imap.search(None, "ALL")
+            ids = data[0].split()
+            if not ids:
+                return f"{source_folder!r} is empty — nothing to move."
+
+            failed = 0
+            for mid in ids:
+                status, _ = imap.copy(mid, destination_folder)
+                if status == "OK":
+                    imap.store(mid, "+FLAGS", "\\Deleted")
+                else:
+                    failed += 1
+
+            imap.expunge()
+
+        moved = len(ids) - failed
+        result = f"Moved {moved} email(s) from {source_folder!r} to {destination_folder!r}."
+        if failed:
+            result += f" {failed} could not be moved."
+        return result
+    except Exception as exc:
+        return f"Error moving emails from {source_folder!r} to {destination_folder!r}: {exc}"
 
 
 @mcp.tool()
@@ -435,11 +568,12 @@ def list_folders() -> str:
 
 
 @mcp.tool()
-def mark_read(message_ids: str) -> str:
+def mark_read(message_ids: str, folder: str = "INBOX") -> str:
     """Mark one or more emails as read.
 
     Args:
         message_ids: Single IMAP message ID or comma-separated list (e.g. "42,43,44").
+        folder:      IMAP folder containing the emails (default "INBOX").
 
     Returns:
         Summary of which IDs were marked and any failures.
@@ -452,7 +586,7 @@ def mark_read(message_ids: str) -> str:
         ok: list[str] = []
         failed: list[str] = []
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             for mid in ids:
                 status, _ = imap.store(mid.encode(), "+FLAGS", "\\Seen")
                 (ok if status == "OK" else failed).append(mid)
@@ -468,18 +602,19 @@ def mark_read(message_ids: str) -> str:
 
 
 @mcp.tool()
-def get_attachments(message_id: str) -> str:
+def get_attachments(message_id: str, folder: str = "INBOX") -> str:
     """List all attachments in an email by its IMAP message ID.
 
     Args:
         message_id: Numeric IMAP message ID of the email to inspect.
+        folder:     IMAP folder containing the email (default "INBOX").
 
     Returns:
         Each attachment's filename, MIME type, and size, or a 'no attachments' notice.
     """
     try:
         with _imap() as imap:
-            imap.select("INBOX")
+            imap.select(folder)
             _, data = imap.fetch(message_id.encode(), "(RFC822)")
             if not data or data[0] is None:
                 return f"Email ID {message_id!r} not found."
@@ -512,11 +647,7 @@ def get_attachments(message_id: str) -> str:
 
 
 def main() -> None:
-    """Start the MCP server.
-
-    Called by ``uv run server.py``, ``python server.py``, or
-    the installed ``aol-mcp-server`` script (via uvx).
-    """
+    """Start the MCP server."""
     if not AOL_EMAIL or not AOL_APP_PASSWORD:
         raise SystemExit(
             "AOL_EMAIL and AOL_APP_PASSWORD must be set.\n"
