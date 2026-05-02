@@ -4,8 +4,11 @@ import email
 import email.header
 import email.mime.multipart
 import email.mime.text
+import html
+import html.parser
 import imaplib
 import os
+import re
 import smtplib
 from contextlib import contextmanager
 
@@ -57,6 +60,42 @@ def _smtp():
                 pass
 
 
+def _strip_html(raw_html: str) -> str:
+    """Convert HTML to readable plain text using stdlib only."""
+
+    class _Stripper(html.parser.HTMLParser):
+        _SKIP = {"script", "style", "head"}
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._parts: list[str] = []
+            self._skip = 0
+
+        def handle_starttag(self, tag: str, attrs: object) -> None:
+            if tag in self._SKIP:
+                self._skip += 1
+            if tag in {"br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}:
+                self._parts.append("\n")
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in self._SKIP:
+                self._skip = max(0, self._skip - 1)
+
+        def handle_data(self, data: str) -> None:
+            if not self._skip:
+                self._parts.append(data)
+
+        def get_text(self) -> str:
+            text = "".join(self._parts)
+            text = html.unescape(text)
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            return text.strip()
+
+    stripper = _Stripper()
+    stripper.feed(raw_html)
+    return stripper.get_text()
+
+
 def _decode_header(value: str) -> str:
     """Decode an RFC 2047-encoded header value to a plain string."""
     parts = email.header.decode_header(value or "")
@@ -71,7 +110,7 @@ def _decode_header(value: str) -> str:
 
 def _extract_body(msg: email.message.Message) -> str:
     """Return best-effort plain-text body from a parsed email message."""
-    plain = html = ""
+    plain = html_src = ""
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
@@ -79,15 +118,17 @@ def _extract_body(msg: email.message.Message) -> str:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
                     plain = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-            elif ct == "text/html" and not html:
+            elif ct == "text/html" and not html_src:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
-                    html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+                    html_src = payload.decode(
+                        part.get_content_charset() or "utf-8", errors="replace"
+                    )
     else:
         payload = msg.get_payload(decode=True)
         if isinstance(payload, bytes):
             plain = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
-    return plain or html or "(no body)"
+    return plain or (_strip_html(html_src) if html_src else "(no body)")
 
 
 def _parse(raw: bytes) -> dict:
