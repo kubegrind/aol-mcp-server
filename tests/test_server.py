@@ -3,6 +3,7 @@ import email.mime.multipart
 import email.mime.text
 import os
 from unittest.mock import MagicMock, patch
+from unittest.mock import mock_open as _mock_open
 
 import pytest
 
@@ -19,7 +20,6 @@ def _build_raw_email(
     date: str = "Mon, 01 Jan 2024 12:00:00 +0000",
     msg_id: str = "<test@example.com>",
 ) -> bytes:
-    """Return a minimal RFC 2822 email as raw bytes."""
     msg = email.mime.multipart.MIMEMultipart()
     msg["From"] = from_
     msg["Subject"] = subject
@@ -234,6 +234,47 @@ class TestSendEmail:
         assert "Content-Type: text/plain" in raw_msg
         assert "multipart" not in raw_msg
 
+    def test_send_with_cc(self):
+        smtp = _mock_smtp()
+        with patch("smtplib.SMTP_SSL", return_value=smtp):
+            result = server.send_email("to@x.com", "Hi", "Body", cc="cc@x.com")
+        assert "Error" not in result
+        recipients = smtp.sendmail.call_args[0][1]
+        assert "cc@x.com" in recipients
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "cc@x.com" in raw_msg
+
+    def test_send_with_bcc_in_recipients_not_headers(self):
+        smtp = _mock_smtp()
+        with patch("smtplib.SMTP_SSL", return_value=smtp):
+            result = server.send_email("to@x.com", "Hi", "Body", bcc="bcc@x.com")
+        assert "Error" not in result
+        recipients = smtp.sendmail.call_args[0][1]
+        assert "bcc@x.com" in recipients
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "bcc@x.com" not in raw_msg
+
+    def test_send_with_attachment(self):
+        smtp = _mock_smtp()
+        with (
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+            patch("os.path.isfile", return_value=True),
+            patch("builtins.open", _mock_open(read_data=b"file content")),
+        ):
+            result = server.send_email("to@x.com", "Hi", "Body", attachments="/path/report.pdf")
+        assert "Error" not in result
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "report.pdf" in raw_msg
+        assert "multipart" in raw_msg
+
+    def test_missing_attachment_returns_error(self):
+        with (
+            patch("smtplib.SMTP_SSL", return_value=_mock_smtp()),
+            patch("os.path.isfile", return_value=False),
+        ):
+            result = server.send_email("to@x.com", "Hi", "Body", attachments="/missing.pdf")
+        assert "not found" in result.lower()
+
     def test_smtp_auth_failure_returns_string(self):
         with patch("smtplib.SMTP_SSL", side_effect=Exception("auth failed")):
             result = server.send_email("to@example.com", "Subject", "Body")
@@ -280,6 +321,30 @@ class TestReplyEmail:
             server.reply_email("1", "body")
         raw_msg = smtp.sendmail.call_args[0][2]
         assert "Date:" in raw_msg
+
+    def test_reply_with_cc(self):
+        smtp = _mock_smtp()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=_mock_imap()),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
+            server.reply_email("1", "body", cc="cc@x.com")
+        recipients = smtp.sendmail.call_args[0][1]
+        assert "cc@x.com" in recipients
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "cc@x.com" in raw_msg
+
+    def test_reply_with_bcc_not_in_headers(self):
+        smtp = _mock_smtp()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=_mock_imap()),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
+            server.reply_email("1", "body", bcc="bcc@x.com")
+        recipients = smtp.sendmail.call_args[0][1]
+        assert "bcc@x.com" in recipients
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "bcc@x.com" not in raw_msg
 
     def test_email_not_found(self):
         with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(fetch_data=FETCH_MISSING)):
@@ -632,3 +697,85 @@ class TestMoveAllEmails:
         with patch("imaplib.IMAP4_SSL", side_effect=Exception("connection reset")):
             result = server.move_all_emails("LinkedIn", "Archive")
         assert result.startswith("Error")
+
+
+class TestBugFixes:
+    def test_reply_uses_bare_address_for_smtp(self):
+        raw = _build_raw_email(from_="John Doe <john@example.com>")
+        mock_imap = _mock_imap(fetch_data=[(b"1", raw), b")"])
+        smtp = _mock_smtp()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
+            server.reply_email("1", "body")
+        smtp_recipients = smtp.sendmail.call_args[0][1]
+        assert smtp_recipients == ["john@example.com"]
+
+    def test_reply_to_header_keeps_display_name(self):
+        raw = _build_raw_email(from_="John Doe <john@example.com>")
+        mock_imap = _mock_imap(fetch_data=[(b"1", raw), b")"])
+        smtp = _mock_smtp()
+        with (
+            patch("imaplib.IMAP4_SSL", return_value=mock_imap),
+            patch("smtplib.SMTP_SSL", return_value=smtp),
+        ):
+            server.reply_email("1", "body")
+        raw_msg = smtp.sendmail.call_args[0][2]
+        assert "John Doe" in raw_msg
+
+    def test_imap_folder_quotes_spaces(self):
+        assert server._imap_folder("INBOX") == "INBOX"
+        assert server._imap_folder("Deleted Items") == '"Deleted Items"'
+        assert server._imap_folder("Bulk Mail") == '"Bulk Mail"'
+        assert server._imap_folder("Trash") == "Trash"
+
+    def test_delete_email_quotes_spaced_trash_folder(self):
+        mock_imap = _mock_imap()
+        mock_imap.list.return_value = (
+            "OK",
+            [
+                b'(\\HasNoChildren) "/" "INBOX"',
+                b'(\\HasNoChildren) "/" "Deleted Items"',
+            ],
+        )
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            server.delete_email("1")
+        copy_args = mock_imap.copy.call_args[0]
+        assert copy_args[1] == '"Deleted Items"'
+
+    def test_move_email_quotes_spaced_destination(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            server.move_email("1", "Bulk Mail")
+        copy_args = mock_imap.copy.call_args[0]
+        assert copy_args[1] == '"Bulk Mail"'
+
+    def test_search_strips_quotes_from_query(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.search_emails('say "hello" world')
+        assert "Error" not in result
+        search_call = mock_imap.search.call_args[0][1]
+        assert '"' not in search_call.replace("(", "").replace(")", "").split('"')[0]
+
+    def test_read_inbox_skips_non_tuple_fetch_response(self):
+        mock_imap = _mock_imap()
+        mock_imap.fetch.return_value = ("OK", [b")"])
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.read_inbox()
+        assert "Error" not in result
+
+    def test_read_folder_skips_non_tuple_fetch_response(self):
+        mock_imap = _mock_imap()
+        mock_imap.fetch.return_value = ("OK", [b")"])
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.read_folder("LinkedIn")
+        assert "Error" not in result
+
+    def test_search_emails_skips_non_tuple_fetch_response(self):
+        mock_imap = _mock_imap()
+        mock_imap.fetch.return_value = ("OK", [b")"])
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.search_emails("hello")
+        assert "Error" not in result
