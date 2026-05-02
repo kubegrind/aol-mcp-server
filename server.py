@@ -166,18 +166,18 @@ def _folder_name(entry: bytes) -> str:
 
 
 @mcp.tool()
-def read_inbox(count: int = 10, folder: str = "INBOX") -> str:
+def read_inbox(count: int = 20, folder: str = "INBOX") -> str:
     """List recent emails from any IMAP folder.
 
     Args:
-        count:  Number of recent emails to fetch (1–50, default 10).
+        count:  Number of recent emails to fetch (1–100, default 20).
         folder: IMAP folder to read (default "INBOX"). Use list_folders to see available names.
 
     Returns:
         Formatted list with ID, sender, subject, date, and a short preview.
     """
     try:
-        count = max(1, min(count, 50))
+        count = max(1, min(count, 100))
         with _imap() as imap:
             imap.select(folder)
             _, data = imap.search(None, "ALL")
@@ -205,19 +205,19 @@ def read_inbox(count: int = 10, folder: str = "INBOX") -> str:
 
 
 @mcp.tool()
-def read_folder(folder_name: str, count: int = 10) -> str:
+def read_folder(folder_name: str, count: int = 20) -> str:
     """List recent emails from a named IMAP folder.
 
     Args:
         folder_name: Folder to read (e.g. "LinkedIn", "GitHub", "Spam").
                      Use list_folders to see all available names.
-        count:       Number of recent emails to fetch (1–50, default 10).
+        count:       Number of recent emails to fetch (1–100, default 20).
 
     Returns:
         Formatted list with ID, sender, subject, date, and a short preview.
     """
     try:
-        count = max(1, min(count, 50))
+        count = max(1, min(count, 100))
         with _imap() as imap:
             imap.select(folder_name)
             _, data = imap.search(None, "ALL")
@@ -277,21 +277,21 @@ def read_email(message_id: str, folder: str = "INBOX") -> str:
 
 @mcp.tool()
 def search_emails(
-    query: str, search_in: str = "ALL", count: int = 10, folder: str = "INBOX"
+    query: str, search_in: str = "ALL", count: int = 20, folder: str = "INBOX"
 ) -> str:
     """Search any IMAP folder for emails matching a keyword.
 
     Args:
         query:     The search term.
         search_in: Field to search — ALL, FROM, SUBJECT, or BODY (default ALL).
-        count:     Maximum results to return (1–50, default 10).
+        count:     Maximum results to return (1–100, default 20).
         folder:    IMAP folder to search (default "INBOX"). Use list_folders to see names.
 
     Returns:
         Matching emails with ID, sender, subject, and date.
     """
     try:
-        count = max(1, min(count, 50))
+        count = max(1, min(count, 100))
         field = search_in.upper()
         if field not in {"ALL", "FROM", "SUBJECT", "BODY"}:
             return "search_in must be one of: ALL, FROM, SUBJECT, BODY"

@@ -138,7 +138,7 @@ class TestReadInbox:
         assert "From:" in result
         assert "Subject:" in result
 
-    def test_count_clamped_to_50(self):
+    def test_count_clamped_to_100(self):
         with patch("imaplib.IMAP4_SSL", return_value=_mock_imap()):
             result = server.read_inbox(count=999)
         assert "Error" not in result
