@@ -1,5 +1,5 @@
 [project]
-name = "aol-mcp-server"
+name = "aol-mcp"
 version = "0.1.0"
 description = "MCP server for AOL Mail via IMAP and SMTP"
 requires-python = ">=3.11"
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-aol-mcp-server = "server:main"
+aol-mcp = "server:main"
 
 [project.urls]
 Homepage = "https://github.com/kubegrind/aol-mcp-server"

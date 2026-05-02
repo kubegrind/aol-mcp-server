@@ -47,7 +47,7 @@ There are three ways to run the server depending on your situation.
 Runs directly from PyPI without cloning or installing anything permanently.
 
 ```bash
-uvx aol-mcp-server
+uvx aol-mcp
 ```
 
 Pass credentials via environment variables (see VS Code / Claude Desktop config below).
@@ -58,7 +58,7 @@ Install once, run anywhere by name.
 
 ```bash
 # From PyPI
-uv tool install aol-mcp-server
+uv tool install aol-mcp
 
 # From GitHub (before PyPI publish)
 uv tool install git+https://github.com/kubegrind/aol-mcp-server
@@ -70,7 +70,7 @@ uv tool install .
 Then run:
 
 ```bash
-AOL_EMAIL=you@aol.com AOL_APP_PASSWORD=yourpassword aol-mcp-server
+AOL_EMAIL=you@aol.com AOL_APP_PASSWORD=yourpassword aol-mcp
 ```
 
 ### Option C — Local clone (for development / contributors)
@@ -98,7 +98,7 @@ Create or edit `.vscode/mcp.json` in your workspace:
     "aol-mail": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["aol-mcp-server"],
+      "args": ["aol-mcp"],
       "env": {
         "AOL_EMAIL": "your_email@aol.com",
         "AOL_APP_PASSWORD": "your_app_password"
@@ -144,7 +144,7 @@ Edit your Claude Desktop config:
   "mcpServers": {
     "aol-mail": {
       "command": "uvx",
-      "args": ["aol-mcp-server"],
+      "args": ["aol-mcp"],
       "env": {
         "AOL_EMAIL": "your_email@aol.com",
         "AOL_APP_PASSWORD": "your_app_password"

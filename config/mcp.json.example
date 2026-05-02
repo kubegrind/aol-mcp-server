@@ -3,7 +3,7 @@
     "aol-mail": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["aol-mcp-server"],
+      "args": ["aol-mcp"],
       "env": {
         "AOL_EMAIL": "your_email@aol.com",
         "AOL_APP_PASSWORD": "your_app_password"
