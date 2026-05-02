@@ -8,8 +8,7 @@ Uses **[uv](https://docs.astral.sh/uv/)** for dependency and environment managem
 
 ## Prerequisites
 
-- Python 3.11 or higher
-- **uv** package manager
+- **uv** package manager (Python 3.11+ included automatically)
 - An AOL Mail account with IMAP access enabled
 - An AOL **app password** (not your main AOL password)
 
@@ -39,34 +38,77 @@ Verify: `uv --version`
 
 ---
 
-## Installation
+## Usage
+
+There are three ways to run the server depending on your situation.
+
+### Option A — `uvx` (recommended, no install required)
+
+Runs directly from PyPI without cloning or installing anything permanently.
+
+```bash
+uvx aol-mcp-server
+```
+
+Pass credentials via environment variables (see VS Code / Claude Desktop config below).
+
+### Option B — Install as a persistent tool
+
+Install once, run anywhere by name.
+
+```bash
+# From PyPI
+uv tool install aol-mcp-server
+
+# From GitHub (before PyPI publish)
+uv tool install git+https://github.com/kubegrind/aol-mcp-server
+
+# From a local clone
+uv tool install .
+```
+
+Then run:
+
+```bash
+AOL_EMAIL=you@aol.com AOL_APP_PASSWORD=yourpassword aol-mcp-server
+```
+
+### Option C — Local clone (for development / contributors)
 
 ```bash
 git clone https://github.com/kubegrind/aol-mcp-server
 cd aol-mcp-server
 uv sync
 cp .env.example .env
-# Edit .env with your AOL credentials
+# Edit .env with your credentials
 uv run server.py
-```
-
----
-
-## Configuration
-
-### .env
-
-```env
-AOL_EMAIL=your_email@aol.com
-AOL_APP_PASSWORD=your_aol_app_password
 ```
 
 ---
 
 ## VS Code (GitHub Copilot Agent Mode) Setup
 
-1. Open your workspace in VS Code.
-2. Create `.vscode/mcp.json` (or add to an existing one):
+Create or edit `.vscode/mcp.json` in your workspace:
+
+**Recommended — `uvx` (no install needed):**
+
+```json
+{
+  "servers": {
+    "aol-mail": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["aol-mcp-server"],
+      "env": {
+        "AOL_EMAIL": "your_email@aol.com",
+        "AOL_APP_PASSWORD": "your_app_password"
+      }
+    }
+  }
+}
+```
+
+**Alternative — local clone:**
 
 ```json
 {
@@ -74,12 +116,7 @@ AOL_APP_PASSWORD=your_aol_app_password
     "aol-mail": {
       "type": "stdio",
       "command": "uv",
-      "args": [
-        "run",
-        "--with", "fastmcp",
-        "--with", "python-dotenv",
-        "server.py"
-      ],
+      "args": ["run", "--directory", "/path/to/aol-mcp-server", "server.py"],
       "env": {
         "AOL_EMAIL": "your_email@aol.com",
         "AOL_APP_PASSWORD": "your_app_password"
@@ -89,27 +126,42 @@ AOL_APP_PASSWORD=your_aol_app_password
 }
 ```
 
-3. Open Copilot Chat, switch to **Agent Mode** — the AOL Mail tools appear automatically.
+Open Copilot Chat, switch to **Agent Mode** — AOL Mail tools appear automatically.
 
 ---
 
 ## Claude Desktop Setup
 
-Edit your Claude Desktop config file:
+Edit your Claude Desktop config:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+**Recommended — `uvx`:**
+
+```json
+{
+  "mcpServers": {
+    "aol-mail": {
+      "command": "uvx",
+      "args": ["aol-mcp-server"],
+      "env": {
+        "AOL_EMAIL": "your_email@aol.com",
+        "AOL_APP_PASSWORD": "your_app_password"
+      }
+    }
+  }
+}
+```
+
+**Alternative — local clone:**
 
 ```json
 {
   "mcpServers": {
     "aol-mail": {
       "command": "uv",
-      "args": [
-        "run",
-        "--directory", "/full/path/to/aol-mcp-server",
-        "server.py"
-      ],
+      "args": ["run", "--directory", "/full/path/to/aol-mcp-server", "server.py"],
       "env": {
         "AOL_EMAIL": "your_email@aol.com",
         "AOL_APP_PASSWORD": "your_app_password"
@@ -119,8 +171,7 @@ Edit your Claude Desktop config file:
 }
 ```
 
-Replace `/full/path/to/aol-mcp-server` with the absolute path on your system.  
-Restart Claude Desktop — AOL Mail tools will appear in the tools panel.
+Restart Claude Desktop after saving — AOL Mail tools appear in the tools panel.
 
 ---
 
@@ -169,7 +220,7 @@ List attachments in email 33.
 
 ### "AUTHENTICATE failed" / login rejected
 - Make sure `AOL_APP_PASSWORD` is the **app password** from myaccount.aol.com, not your AOL login password.
-- Re-generate the app password and update `.env`.
+- Re-generate the app password and update your config.
 - Confirm IMAP is enabled in your AOL account security settings.
 
 ### "Connection refused" / timeout on ports 993 or 465
@@ -179,14 +230,14 @@ List attachments in email 33.
 ### Emails not found by ID
 - IMAP message IDs are session-scoped integers. Run `read_inbox` first to retrieve current IDs.
 
-### `uv` not found in VS Code or Claude Desktop
-- Add `uv` to your system `PATH` (the installer normally does this).
-- Find the full path with `which uv` (macOS/Linux) or `where uv` (Windows) and use it as the `command` value in the MCP config.
-- macOS example: `"command": "/Users/you/.local/bin/uv"`
+### `uvx` / `uv` not found in VS Code or Claude Desktop
+- Ensure `uv` is on your system `PATH` (the installer normally handles this).
+- Find the full path with `which uv` (macOS/Linux) or `where uv` (Windows) and use it as `command`.
+- macOS example: `"command": "/Users/you/.local/bin/uvx"`
 
-### `uv sync` fails / dependency resolution error
+### `uv tool install` fails
 - Ensure Python 3.11+ is available: `uv python install 3.11`
-- Delete `.venv` and re-run `uv sync`.
+- Try `uv tool install --reinstall aol-mcp-server` to force a clean install.
 
 ### SSL certificate errors
 - Upgrade your CA bundle: `uv run --with certifi python -m certifi`
@@ -196,7 +247,7 @@ List attachments in email 33.
 
 ## Security Notes
 
-- Credentials loaded from `.env` only — never hard-coded or logged.
+- Credentials are passed via environment variables — never stored in the package.
 - `.env` is in `.gitignore` and must never be committed.
-- Passwords are never included in error messages or log output.
+- Passwords are never logged or included in error messages.
 - All IMAP and SMTP connections are closed in `finally` blocks — no connection leaks.
