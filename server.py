@@ -455,26 +455,20 @@ def delete_all_in_folder(folder_name: str) -> str:
                 "Trash",
             )
 
-            _, data = imap.search(None, "ALL")
-            ids = data[0].split()
-            if not ids:
+            _, data = imap.uid("SEARCH", None, "ALL")
+            uids = data[0].split()
+            if not uids:
                 return f"{folder_name!r} is already empty."
 
-            failed = 0
-            for mid in ids:
-                status, _ = imap.copy(mid, trash)
-                if status == "OK":
-                    imap.store(mid, "+FLAGS", "\\Deleted")
-                else:
-                    failed += 1
+            uid_set = b",".join(uids)
+            status, _ = imap.uid("COPY", uid_set, trash)
+            if status != "OK":
+                return f"Could not copy emails to {trash!r}."
 
+            imap.uid("STORE", uid_set, "+FLAGS", "\\Deleted")
             imap.expunge()
 
-        deleted = len(ids) - failed
-        result = f"Deleted {deleted} email(s) from {folder_name!r}."
-        if failed:
-            result += f" {failed} could not be moved to trash."
-        return result
+        return f"Deleted {len(uids)} email(s) from {folder_name!r}."
     except Exception as exc:
         return f"Error deleting emails in {folder_name!r}: {exc}"
 
@@ -523,26 +517,23 @@ def move_all_emails(source_folder: str, destination_folder: str) -> str:
     try:
         with _imap() as imap:
             imap.select(source_folder)
-            _, data = imap.search(None, "ALL")
-            ids = data[0].split()
-            if not ids:
+            _, data = imap.uid("SEARCH", None, "ALL")
+            uids = data[0].split()
+            if not uids:
                 return f"{source_folder!r} is empty — nothing to move."
 
-            failed = 0
-            for mid in ids:
-                status, _ = imap.copy(mid, destination_folder)
-                if status == "OK":
-                    imap.store(mid, "+FLAGS", "\\Deleted")
-                else:
-                    failed += 1
+            uid_set = b",".join(uids)
+            status, _ = imap.uid("COPY", uid_set, destination_folder)
+            if status != "OK":
+                return (
+                    f"Could not copy emails to {destination_folder!r}. "
+                    "Use list_folders to verify the folder name."
+                )
 
+            imap.uid("STORE", uid_set, "+FLAGS", "\\Deleted")
             imap.expunge()
 
-        moved = len(ids) - failed
-        result = f"Moved {moved} email(s) from {source_folder!r} to {destination_folder!r}."
-        if failed:
-            result += f" {failed} could not be moved."
-        return result
+        return f"Moved {len(uids)} email(s) from {source_folder!r} to {destination_folder!r}."
     except Exception as exc:
         return f"Error moving emails from {source_folder!r} to {destination_folder!r}: {exc}"
 

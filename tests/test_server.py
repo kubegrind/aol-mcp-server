@@ -58,6 +58,13 @@ def _mock_imap(
         ],
     )
     imap.logout.return_value = ("BYE", [b""])
+
+    def _uid(cmd, *args):
+        if cmd == "SEARCH":
+            return ("OK", [message_ids])
+        return ("OK", [b""])
+
+    imap.uid.side_effect = _uid
     return imap
 
 
@@ -508,23 +515,38 @@ class TestDeleteAllInFolder:
             result = server.delete_all_in_folder("Spam")
         mock_imap.select.assert_called_with("Spam")
         assert "Deleted" in result
+        assert "3" in result
         mock_imap.expunge.assert_called_once()
+
+    def test_uses_uid_commands(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            server.delete_all_in_folder("LinkedIn")
+        uid_cmds = [call[0][0] for call in mock_imap.uid.call_args_list]
+        assert "SEARCH" in uid_cmds
+        assert "COPY" in uid_cmds
+        assert "STORE" in uid_cmds
 
     def test_empty_folder_message(self):
         with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
             result = server.delete_all_in_folder("Spam")
         assert "already empty" in result.lower()
 
-    def test_partial_failure_reported(self):
+    def test_copy_failure_returns_error(self):
         mock_imap = _mock_imap()
-        mock_imap.copy.side_effect = [
-            ("OK", [b""]),
-            ("NO", [b"failed"]),
-            ("OK", [b""]),
-        ]
+
+        def _uid_fail(cmd, *args):
+            if cmd == "SEARCH":
+                return ("OK", [b"1 2 3"])
+            if cmd == "COPY":
+                return ("NO", [b"permission denied"])
+            return ("OK", [b""])
+
+        mock_imap.uid.side_effect = _uid_fail
         with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
             result = server.delete_all_in_folder("LinkedIn")
-        assert "could not" in result.lower()
+        assert "Could not" in result
+        mock_imap.expunge.assert_not_called()
 
     def test_error_returns_string(self):
         with patch("imaplib.IMAP4_SSL", side_effect=Exception("imap down")):
@@ -543,32 +565,43 @@ class TestMoveAllEmails:
         assert "Archive" in result
         mock_imap.expunge.assert_called_once()
 
+    def test_uses_uid_commands(self):
+        mock_imap = _mock_imap()
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            server.move_all_emails("GitHub", "Archive")
+        uid_cmds = [call[0][0] for call in mock_imap.uid.call_args_list]
+        assert "SEARCH" in uid_cmds
+        assert "COPY" in uid_cmds
+        assert "STORE" in uid_cmds
+
     def test_empty_source_folder(self):
         with patch("imaplib.IMAP4_SSL", return_value=_mock_imap(message_ids=b"")):
             result = server.move_all_emails("EmptyFolder", "Archive")
         assert "empty" in result.lower()
 
-    def test_partial_failure_reported(self):
+    def test_copy_failure_returns_error_with_hint(self):
         mock_imap = _mock_imap()
-        mock_imap.copy.side_effect = [
-            ("OK", [b""]),
-            ("NO", [b"no such mailbox"]),
-            ("OK", [b""]),
-        ]
-        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
-            result = server.move_all_emails("GitHub", "Archive")
-        assert "could not" in result.lower()
 
-    def test_store_called_only_for_successful_copies(self):
+        def _uid_fail(cmd, *args):
+            if cmd == "SEARCH":
+                return ("OK", [b"1 2 3"])
+            if cmd == "COPY":
+                return ("NO", [b"no such mailbox"])
+            return ("OK", [b""])
+
+        mock_imap.uid.side_effect = _uid_fail
+        with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
+            result = server.move_all_emails("GitHub", "NonExistentFolder")
+        assert "list_folders" in result or "Could not" in result
+        mock_imap.expunge.assert_not_called()
+
+    def test_uid_set_includes_all_messages(self):
         mock_imap = _mock_imap()
-        mock_imap.copy.side_effect = [
-            ("OK", [b""]),
-            ("NO", [b"failed"]),
-            ("OK", [b""]),
-        ]
         with patch("imaplib.IMAP4_SSL", return_value=mock_imap):
             server.move_all_emails("Spam", "INBOX")
-        assert mock_imap.store.call_count == 2
+        copy_call = next(c for c in mock_imap.uid.call_args_list if c[0][0] == "COPY")
+        uid_set = copy_call[0][1]
+        assert b"1" in uid_set and b"2" in uid_set and b"3" in uid_set
 
     def test_error_returns_string(self):
         with patch("imaplib.IMAP4_SSL", side_effect=Exception("connection reset")):
