@@ -87,7 +87,7 @@ jobs:
           name: dist
           path: dist/
 
-      - uses: softprops/action-gh-release@v3.0.0
+      - uses: softprops/action-gh-release@v3.0.3
         with:
           files: dist/*
           generate_release_notes: true
